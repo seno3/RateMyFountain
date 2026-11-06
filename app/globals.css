@@ -1,26 +1,31 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* One accent color, dark text, white background. See SPEC.md §1.
+   Gold (#CFB991) is only ever a background behind dark text: as text on white it fails contrast. */
+@theme {
+  --color-accent: #cfb991;
+  --color-accent-strong: #8e6f3e; /* darker gold for bars/focus; 4.6:1 on white */
+  --color-ink: #1a1a1a;
+  --color-muted: #595959; /* 7:1 on white */
+  --color-line: #d4d4d4;
+  --color-surface: #f7f7f5;
+  --color-track: #ececec;
+  --color-warning: #8a4b00;
+  --color-warning-bg: #fff4e5;
+  --color-warning-line: #f0c27a;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: light;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: #ffffff;
+  color: var(--color-ink);
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-accent-strong);
+  outline-offset: 2px;
 }
