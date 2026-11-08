@@ -77,3 +77,13 @@ export function bayesianScore(sum: number, n: number, m: number, c: number = BAY
 export function formatScore(score: number | null | undefined): string {
   return score == null ? "–" : score.toFixed(1);
 }
+
+/** Color bucket for a score: map pins, badges, rings. Always shown next to the number, never alone. */
+export type ScoreTone = "good" | "okay" | "poor" | "none";
+
+export function scoreTone(score: number | null | undefined): ScoreTone {
+  if (score == null) return "none";
+  if (score >= 4) return "good";
+  if (score >= 3) return "okay";
+  return "poor";
+}

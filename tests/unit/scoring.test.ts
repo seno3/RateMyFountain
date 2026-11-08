@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { BAYES_C, MAX_TAGS, TAGS, bayesianScore, formatScore, isValidTagList, overallScore } from "../../lib/scoring";
+import { BAYES_C, MAX_TAGS, TAGS, bayesianScore, formatScore, isValidTagList, overallScore, scoreTone } from "../../lib/scoring";
 
 describe("overallScore", () => {
   it("is the mean of the four core categories", () => {
@@ -66,5 +66,18 @@ describe("TS and SQL stay in sync", () => {
 
   it("BAYES_C matches scoring_c() in SQL", () => {
     expect(sql).toMatch(new RegExp(`select ${BAYES_C}::numeric`));
+  });
+});
+
+describe("scoreTone", () => {
+  it("buckets scores at 4 and 3", () => {
+    expect(scoreTone(4.6)).toBe("good");
+    expect(scoreTone(4)).toBe("good");
+    expect(scoreTone(3.9)).toBe("okay");
+    expect(scoreTone(3)).toBe("okay");
+    expect(scoreTone(2.9)).toBe("poor");
+  });
+  it("is 'none' with no ratings", () => {
+    expect(scoreTone(null)).toBe("none");
   });
 });

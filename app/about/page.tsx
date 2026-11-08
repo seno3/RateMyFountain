@@ -4,11 +4,11 @@ export const metadata = { title: "About" };
 
 export default function AboutPage() {
   return (
-    <article className="space-y-6 leading-relaxed">
-      <h1 className="text-2xl font-bold">About Boiler Fountains</h1>
+    <article className="mx-auto max-w-2xl space-y-6 leading-relaxed">
+      <h1 className="text-4xl font-semibold tracking-tight">About Boiler Fountains</h1>
 
-      <section className="space-y-2">
-        <h2 className="text-lg font-semibold">What this is</h2>
+      <section className="space-y-2 rounded-3xl border border-line bg-surface p-6 text-[15px] text-muted shadow-card [&_strong]:text-ink">
+        <h2 className="text-lg font-semibold tracking-tight text-ink">What this is</h2>
         <p>
           A student-made site for finding good drinking fountains on campus. Anyone can add a
           fountain and rate it on temperature, flow, trajectory and taste.
@@ -18,8 +18,8 @@ export default function AboutPage() {
         </p>
       </section>
 
-      <section className="space-y-2">
-        <h2 className="text-lg font-semibold">How scores work</h2>
+      <section className="space-y-2 rounded-3xl border border-line bg-surface p-6 text-[15px] text-muted shadow-card [&_strong]:text-ink">
+        <h2 className="text-lg font-semibold tracking-tight text-ink">How scores work</h2>
         <p>
           Each rating scores four things from 1 to 5. A fountain&apos;s overall score is the average
           of those four, across all its ratings. Bottle fillers are scored separately and don&apos;t
@@ -37,8 +37,8 @@ export default function AboutPage() {
         </p>
       </section>
 
-      <section className="space-y-2">
-        <h2 className="text-lg font-semibold">Privacy</h2>
+      <section className="space-y-2 rounded-3xl border border-line bg-surface p-6 text-[15px] text-muted shadow-card [&_strong]:text-ink">
+        <h2 className="text-lg font-semibold tracking-tight text-ink">Privacy</h2>
         <p>
           We don&apos;t collect personal information. You don&apos;t need an account. When you
           rate a fountain, your browser gets a random anonymous ID so you can update your rating
@@ -47,8 +47,8 @@ export default function AboutPage() {
         </p>
       </section>
 
-      <section className="space-y-2">
-        <h2 className="text-lg font-semibold">Contact</h2>
+      <section className="space-y-2 rounded-3xl border border-line bg-surface p-6 text-[15px] text-muted shadow-card [&_strong]:text-ink">
+        <h2 className="text-lg font-semibold tracking-tight text-ink">Contact</h2>
         {/* TODO: add a real contact address or link before launch. */}
         <p>Found a problem with a fountain? Use &ldquo;Report a problem&rdquo; on its page.</p>
       </section>

@@ -27,7 +27,7 @@ A community-sourced website where Purdue students find drinking fountains and ra
 
 **Design principles**
 1. Super simple to navigate. At most 4 primary screens.
-2. Not flashy. White background, one accent color (Purdue-ish gold `#CFB991`, with dark text `#1a1a1a` for contrast), system font stack, no animations beyond basic transitions, no gradients, no illustrations.
+2. Sleek, not noisy. Warm off-white (or near-black in dark mode) background, one accent color (Purdue-ish gold `#CFB991`, with dark text for contrast), Geist font, rounded cards, soft gold glows and subtle motion (respects reduced-motion). Score colors are never the only signal.
 3. Mobile first. Tap targets ≥ 44px. Works one-handed.
 4. Fast. A fountain page should load fast on campus Wi-Fi, with little client-side JS on content pages.
 5. Accessible. Semantic HTML, keyboard navigable, WCAG AA contrast, labels on every control, and rating buttons that work for screen readers (radio groups, not bare divs).
@@ -44,7 +44,7 @@ A community-sourced website where Purdue students find drinking fountains and ra
 | Styling | **[DECISION]** Tailwind CSS | No component library. Build the ~6 components we need by hand |
 | Database + auth | **[DECISION]** Supabase (Postgres, Auth, Row Level Security) | Use `@supabase/ssr` for Next.js integration |
 | Auth model | **[DECISION]** Supabase anonymous sign-in (silent, on first rating) + CAPTCHA (Cloudflare Turnstile) on that sign-in. Schema must allow upgrading to purdue.edu email sign-in later without migrating data | See §6 |
-| Map | **[DECISION]** Leaflet via `react-leaflet`, tiles from a free provider that allows this use (check the tile provider's usage policy and put attribution on the map) | Map loads client-side only (dynamic import, no SSR) |
+| Map | MapLibre GL with OpenFreeMap vector tiles (Light / Dark / 3D buildings); optional Mapbox satellite with `NEXT_PUBLIC_MAPBOX_TOKEN`. Attribution shown on the map | Map loads client-side only (dynamic import, no SSR) |
 | Validation | Zod | Shared between forms and server actions |
 | Mutations | Next.js Server Actions calling Supabase with the user's session (RLS enforced). Never use the service-role key in request paths | |
 | Testing | Vitest (unit), Playwright (a few end-to-end flows) | |

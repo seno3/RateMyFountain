@@ -1,31 +1,157 @@
 @import "tailwindcss";
 
-/* One accent color, dark text, white background. See SPEC.md §1.
-   Gold (#CFB991) is only ever a background behind dark text: as text on white it fails contrast. */
+/* Design tokens. Utilities like bg-surface / text-muted read these variables,
+   and the dark-mode block below swaps the values, so components don't need dark: variants.
+   Gold (#CFB991) is only a background behind dark text in light mode (it fails contrast as text on white);
+   in dark mode it's fine as text. */
 @theme {
+  --color-bg: #f6f5f1;
+  --color-surface: #ffffff;
+  --color-elevated: #ffffff;
+  --color-ink: #111113;
+  --color-muted: #5b5b63; /* 6.5:1 on bg */
+  --color-line: rgb(17 17 19 / 0.09);
+  --color-line-strong: rgb(17 17 19 / 0.16);
+  --color-track: rgb(17 17 19 / 0.07);
+
   --color-accent: #cfb991;
-  --color-accent-strong: #8e6f3e; /* darker gold for bars/focus; 4.6:1 on white */
-  --color-ink: #1a1a1a;
-  --color-muted: #595959; /* 7:1 on white */
-  --color-line: #d4d4d4;
-  --color-surface: #f7f7f5;
-  --color-track: #ececec;
+  --color-accent-soft: rgb(207 185 145 / 0.22);
+  --color-accent-strong: #8e6f3e; /* 4.6:1 on white */
+  --color-accent-ink: #111113; /* text on accent backgrounds */
+
+  /* Score tones (text-safe in both themes). Never the only signal: the number is always shown. */
+  --color-good: #15803d;
+  --color-good-soft: rgb(21 128 61 / 0.12);
+  --color-okay: #8e6f3e;
+  --color-okay-soft: rgb(207 185 145 / 0.3);
+  --color-poor: #b91c1c;
+  --color-poor-soft: rgb(185 28 28 / 0.1);
+  --color-none: #6b6b73;
+  --color-none-soft: rgb(17 17 19 / 0.06);
+
   --color-warning: #8a4b00;
   --color-warning-bg: #fff4e5;
   --color-warning-line: #f0c27a;
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  --font-sans: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace;
+  --font-serif: var(--font-instrument-serif), "Times New Roman", serif;
+
+  --shadow-card: 0 1px 2px rgb(17 17 19 / 0.04), 0 4px 16px -6px rgb(17 17 19 / 0.08);
+  --shadow-float: 0 2px 6px rgb(17 17 19 / 0.08), 0 16px 40px -12px rgb(17 17 19 / 0.25);
+
+  --animate-rise: rise 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #0b0b0d;
+    --color-surface: #141417;
+    --color-elevated: #1c1c20;
+    --color-ink: #f3f3f4;
+    --color-muted: #a3a3ad;
+    --color-line: rgb(255 255 255 / 0.08);
+    --color-line-strong: rgb(255 255 255 / 0.16);
+    --color-track: rgb(255 255 255 / 0.08);
+
+    --color-accent-soft: rgb(207 185 145 / 0.14);
+    --color-accent-strong: #cfb991;
+
+    --color-good: #4ade80;
+    --color-good-soft: rgb(74 222 128 / 0.12);
+    --color-okay: #dcc89f;
+    --color-okay-soft: rgb(207 185 145 / 0.16);
+    --color-poor: #f87171;
+    --color-poor-soft: rgb(248 113 113 / 0.12);
+    --color-none: #9a9aa3;
+    --color-none-soft: rgb(255 255 255 / 0.06);
+
+    --color-warning: #fbbf24;
+    --color-warning-bg: rgb(251 191 36 / 0.08);
+    --color-warning-line: rgb(251 191 36 / 0.3);
+
+    --shadow-card: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 8px 24px -12px rgb(0 0 0 / 0.6);
+    --shadow-float: 0 1px 0 rgb(255 255 255 / 0.06) inset, 0 20px 50px -12px rgb(0 0 0 / 0.8);
+  }
 }
 
 html {
-  color-scheme: light;
+  color-scheme: light dark;
 }
 
 body {
-  background: #ffffff;
+  background: var(--color-bg);
   color: var(--color-ink);
+  /* The home hero is full-bleed (100vw); clip so the scrollbar width never causes sideways scroll. */
+  overflow-x: clip;
 }
 
 :focus-visible {
-  outline: 3px solid var(--color-accent-strong);
+  outline: 2px solid var(--color-accent-strong);
   outline-offset: 2px;
+}
+
+::selection {
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* MapLibre's attribution box, restyled to match. */
+.maplibregl-ctrl-attrib {
+  font-size: 11px;
+  background: color-mix(in srgb, var(--color-surface) 80%, transparent) !important;
+  backdrop-filter: blur(8px);
+  border-radius: 8px 0 0 0;
+}
+.maplibregl-ctrl-attrib a {
+  color: var(--color-muted) !important;
+}
+
+/* Home page: monochrome, always dark. The stage carries its own nav, so the global header is hidden. */
+body:has([data-home]) {
+  --color-bg: #000;
+  --color-surface: #0a0a0a;
+  --color-elevated: #111;
+  --color-ink: #f2f2f2;
+  --color-muted: #8c8c8c;
+  --color-line: rgb(255 255 255 / 0.1);
+  --color-line-strong: rgb(255 255 255 / 0.2);
+  --color-track: rgb(255 255 255 / 0.08);
+  --color-accent: #fff;
+  --color-accent-soft: rgb(255 255 255 / 0.08);
+  --color-accent-strong: #fff;
+  --color-accent-ink: #000;
+  color-scheme: dark;
+}
+body:has([data-home]) > header {
+  display: none;
+}
+
+/* Animated film grain. */
+.grain {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.9 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation: grain 0.9s steps(6) infinite;
+}
+@keyframes grain {
+  0% { transform: translate(0, 0); }
+  20% { transform: translate(-3%, 2%); }
+  40% { transform: translate(2%, -4%); }
+  60% { transform: translate(-4%, -1%); }
+  80% { transform: translate(3%, 3%); }
+  100% { transform: translate(0, 0); }
 }

@@ -8,7 +8,7 @@ See [`SPEC.md`](SPEC.md) for the full product spec and [`docs/DECISIONS.md`](doc
 
 ## Stack
 
-Next.js 16 (App Router, TypeScript strict) · Tailwind CSS v4 · Supabase (Postgres, Auth, Row Level Security) · Zod · Vitest.
+Next.js 16 (App Router, TypeScript strict) · Tailwind CSS v4 · MapLibre GL (OpenFreeMap tiles, optional Mapbox satellite) · Supabase (Postgres, Auth, Row Level Security) · Zod · Vitest.
 
 ## Local setup
 
@@ -46,6 +46,7 @@ Run `pnpm dev:lan`, then open `http://<your computer's LAN IP>:3000` on a phone 
 |---|---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | server + browser | Supabase API URL |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | server + browser | Public key. Safe to expose; RLS protects the data |
+| `NEXT_PUBLIC_MAPBOX_TOKEN` | browser | Optional. Public Mapbox token (`pk.…`); adds a Satellite map style. Restrict it to your domain in the Mapbox dashboard |
 
 No secret keys are used by the app.
 

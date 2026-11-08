@@ -47,3 +47,10 @@ One paragraph per non-obvious choice: what, why, and what else we considered.
 **What:** the scaffold turns on `cacheComponents` and `partialPrefetching`. Pages render a static shell and stream the data parts behind `<Suspense>`.
 **Catch:** request-time values (cookies, current time, uncached data) must sit inside a `<Suspense>` boundary or a cached function. The fountain page calls `connection()` because "last rated N days ago" depends on the current time.
 **Known limitation:** because the page streams, an unknown fountain or building renders the not-found page with HTTP status 200 instead of 404. Fine for users. Revisit if it matters for search engines.
+
+## MapLibre + OpenFreeMap, with Mapbox as an optional extra
+
+**What:** the map (`/?view=map`) uses MapLibre GL, the open-source fork of Mapbox GL JS, with free vector base maps from OpenFreeMap (Light, Dark, and 3D extruded buildings). If `NEXT_PUBLIC_MAPBOX_TOKEN` is set, a Satellite style appears, using Mapbox's raster tiles.
+**Why:** looks as good as Mapbox (vector tiles, smooth zoom, tilt, 3D buildings) but works with no account or API key, and has no usage bill. Mapbox's own GL JS v3 needs a token for everything and bills per map load.
+**Alternatives:** Leaflet (the original spec; raster only, no 3D, looks dated), Mapbox GL JS directly (token required).
+**Catch:** pins are HTML elements, not map layers, which is fine for a few hundred buildings. If that grows a lot, switch to a GeoJSON source with clustering.
