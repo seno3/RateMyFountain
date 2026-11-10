@@ -24,7 +24,7 @@ async function Building({ params }: Pick<PageProps<"/b/[code]">, "params">) {
 
   return (
     <div className="space-y-8">
-      <Link href="/" className="inline-flex min-h-11 items-center gap-1 text-sm text-muted hover:text-ink">
+      <Link href="/fountains" className="inline-flex min-h-11 items-center gap-1 text-sm text-muted hover:text-ink">
         <span aria-hidden="true">←</span> All fountains
       </Link>
 
@@ -37,7 +37,7 @@ async function Building({ params }: Pick<PageProps<"/b/[code]">, "params">) {
           {floors.length > 0 && <span>· {pluralize(floors.length, "floor")}</span>}
           {hasLocation(building) && (
             <Link
-              href={`/?view=map&q=${encodeURIComponent(building.code)}`}
+              href={`/fountains?view=map&q=${encodeURIComponent(building.code)}`}
               className="ml-auto inline-flex min-h-10 items-center rounded-full border border-line px-4 font-medium text-ink transition-colors hover:border-line-strong"
             >
               Show on map

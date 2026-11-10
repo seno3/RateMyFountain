@@ -6,9 +6,12 @@ import { createFountainScene } from "./scene";
 export default function FountainCanvas({
   stageRef,
   progressRef,
+  counter,
 }: {
   stageRef: RefObject<HTMLDivElement | null>;
   progressRef: RefObject<number>;
+  /** Shown on the bottle filler's "bottles saved" display. */
+  counter: number;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [ready, setReady] = useState(false);
@@ -20,13 +23,13 @@ export default function FountainCanvas({
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     let scene: ReturnType<typeof createFountainScene> | undefined;
     try {
-      scene = createFountainScene(canvas, { reducedMotion, root, getProgress: () => progressRef.current });
+      scene = createFountainScene(canvas, { reducedMotion, root, counter, getProgress: () => progressRef.current });
       requestAnimationFrame(() => setReady(true));
     } catch {
       // No WebGL: the stage's text plates still work on their own.
     }
     return () => scene?.dispose();
-  }, [stageRef, progressRef]);
+  }, [stageRef, progressRef, counter]);
 
   return (
     <canvas

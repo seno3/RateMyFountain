@@ -34,7 +34,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             </Link>
             <div className="flex items-center gap-1 text-sm">
               <Link
-                href="/?view=map"
+                href="/fountains"
+                className="flex min-h-11 items-center rounded-full px-3 text-muted transition-colors hover:text-ink"
+              >
+                Ratings
+              </Link>
+              <Link
+                href="/fountains?view=map"
                 className="flex min-h-11 items-center rounded-full px-3 text-muted transition-colors hover:text-ink"
               >
                 Map

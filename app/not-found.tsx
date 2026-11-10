@@ -8,7 +8,7 @@ export default function NotFound() {
       <h1 className="mt-6 text-3xl font-semibold tracking-tight">Dry spell.</h1>
       <p className="mt-2 text-muted">We couldn&apos;t find that page or fountain.</p>
       <Link
-        href="/"
+        href="/fountains"
         className="mt-6 inline-flex min-h-11 items-center rounded-full bg-ink px-5 text-sm font-medium text-bg hover:opacity-85"
       >
         Back to all fountains

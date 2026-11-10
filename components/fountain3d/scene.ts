@@ -1,50 +1,28 @@
 import * as THREE from "three";
 
-// A realistic stainless pedestal drinking fountain under a single museum light.
-// Scroll drives everything: spin, an exploded technical view, then the water turning on.
+// The fountain you actually find in a US university hallway: a wall-mounted, stainless, bi-level
+// cooler (a high basin and a lower ADA basin) with a bottle-filling station above the high side.
+// Modeled in inches after the common ~37" wide x 39" high x 19" deep units, then scaled down.
 
 export type SceneHandle = { dispose(): void };
 type Options = {
   reducedMotion: boolean;
-  /** Stage element: holds the [data-anchor] annotation labels positioned by this scene. */
+  /** Stage element; its size drives the canvas size. */
   root: HTMLElement;
-  /** 0..1 progress through the pinned scroll sequence. */
+  /** 0..1 progress through the pinned scroll section. */
   getProgress: () => number;
+  /** Number shown on the bottle filler's "bottles saved" display. */
+  counter: number;
 };
 
-// Fountain-space landmarks (y up, floor flange at y = 0).
-const NOZZLE = new THREE.Vector3(-0.268, 2.258, 0);
-const IMPACT = new THREE.Vector3(0.15, 2.106, 0);
-const POOL_Y = 2.108;
-const CENTER_OFFSET = -1.15;
-
-type PartName = "base" | "pedestal" | "panel" | "bowl" | "drain" | "bubbler" | "guard" | "button";
-
-// How far each part travels in the exploded view.
-const EXPLODE: Record<PartName, [number, number, number]> = {
-  base: [0, -0.5, 0],
-  pedestal: [0, 0, 0],
-  panel: [0, 0.05, 0.38],
-  bowl: [0, 0.42, 0],
-  drain: [0, 0.78, 0],
-  bubbler: [0.05, 1.08, 0],
-  guard: [-0.22, 1.3, 0],
-  button: [0, 0.42, 0.5],
-};
-
-// Camera keyframes: [progress, camera height, distance factor, look-at height, horizontal skew (wide only)]
-const CAMERA_KEYS = [
-  [0.0, 0.45, 1.0, 0.12, 0],
-  [0.12, 0.45, 1.0, 0.12, 0],
-  [0.3, 1.9, 1.38, 0.5, 0],
-  [0.54, 1.9, 1.38, 0.5, 0],
-  [0.68, 2.5, 0.56, 1.0, -0.4],
-  [0.84, 2.5, 0.56, 1.0, -0.4],
-  [1.0, 0.9, 1.1, 0.25, 0],
-];
+const INCH = 1 / 22; // inches -> scene units
+const HI_RIM = 41;
+const LO_RIM = 36;
+const UNIT_W = 18;
+const UNIT_D = 19;
 
 export function createFountainScene(canvas: HTMLCanvasElement, opts: Options): SceneHandle {
-  const { reducedMotion, root, getProgress } = opts;
+  const { reducedMotion, root, getProgress, counter } = opts;
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -57,24 +35,25 @@ export function createFountainScene(canvas: HTMLCanvasElement, opts: Options): S
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 100);
   const uTime = { value: 0 };
-  const uWater = { value: 0 };
 
   // Reflections from a monochrome studio: big overhead softbox, strip lights, black walls.
   const pmrem = new THREE.PMREMGenerator(renderer);
   const envTexture = pmrem.fromScene(buildStudio(), 0.04).texture;
   scene.environment = envTexture;
-  scene.environmentIntensity = 1.15;
+  scene.environmentIntensity = 1.1;
 
-  // The museum light: casts the soft shadows that sell the realism.
-  const spot = new THREE.SpotLight(0xffffff, 90, 20, 0.42, 1, 1.6);
-  spot.position.set(0.9, 7.5, 1.6);
+  // The museum light: soft shadows of the basins on the wall plate sell the realism.
+  const spot = new THREE.SpotLight(0xffffff, 80, 20, 0.36, 1, 1.6);
+  spot.position.set(1.2, 7, 4);
   spot.castShadow = true;
   spot.shadow.mapSize.set(2048, 2048);
   spot.shadow.bias = -0.0002;
-  spot.shadow.normalBias = 0.015;
+  spot.shadow.normalBias = 0.01;
   spot.shadow.radius = 6;
   scene.add(spot, spot.target);
-  const rim = new THREE.DirectionalLight(0xffffff, 1.4);
+  // Faint bounce from the hallway, so shadows on the wall aren't pure black.
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 0.12));
+  const rim = new THREE.DirectionalLight(0xffffff, 1.2);
   rim.position.set(-3, 2, -5);
   scene.add(rim);
 
@@ -82,53 +61,41 @@ export function createFountainScene(canvas: HTMLCanvasElement, opts: Options): S
   const dust = buildDust();
   scene.add(dust.points);
 
-  // rig (tilt) > fountain (spin) > parts (explode)
+  // rig (pointer tilt) > turntable (scroll) > model (inches)
   const rig = new THREE.Group();
   scene.add(rig);
-  const fountain = new THREE.Group();
-  fountain.position.y = CENTER_OFFSET;
-  rig.add(fountain);
-  const parts = buildFountain();
-  for (const part of Object.values(parts)) fountain.add(part);
-  const water = buildWater(uTime, uWater);
-  parts.bowl.add(water.group);
-
-  // Annotation labels live in the DOM; we project their 3D anchors every frame.
-  const annotations = Array.from(root.querySelectorAll<HTMLElement>("[data-anchor]")).map((el) => {
-    const [x, y, z] = el.dataset.anchor!.split(",").map(Number);
-    return {
-      el,
-      part: parts[el.dataset.part as PartName],
-      local: new THREE.Vector3(x, y, z),
-      side: "right" as "left" | "right",
-    };
-  });
+  const turntable = new THREE.Group();
+  rig.add(turntable);
+  const model = new THREE.Group();
+  model.scale.setScalar(INCH);
+  model.position.set(0, -41 * INCH, -(UNIT_D / 2) * INCH);
+  turntable.add(model);
+  const water = buildFountain(model, uTime, counter, envTexture);
 
   // ---------- Sizing ----------
-  let width = 1;
-  let height = 1;
   let wide = true;
   const resize = () => {
-    width = root.clientWidth;
-    height = root.clientHeight;
-    wide = width >= 768;
-    renderer.setSize(width, height, false);
-    camera.aspect = width / height;
+    const w = root.clientWidth;
+    const h = root.clientHeight;
+    wide = w >= 768;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
   };
   const resizeObserver = new ResizeObserver(resize);
   resizeObserver.observe(root);
   resize();
 
-  // ---------- Input: drag to spin, pointer tilts slightly ----------
+  // ---------- Input: drag to turn, pointer tilts slightly ----------
   const pointer = new THREE.Vector2();
   const pointerTarget = new THREE.Vector2();
   let dragging = false;
   let lastX = 0;
-  let dragVelocity = 0;
+  let dragOffset = 0;
   const onPointerMove = (e: PointerEvent) => {
     pointerTarget.set((e.clientX / window.innerWidth) * 2 - 1, (e.clientY / window.innerHeight) * 2 - 1);
     if (dragging) {
-      dragVelocity += (e.clientX - lastX) * 0.002;
+      dragOffset = THREE.MathUtils.clamp(dragOffset + (e.clientX - lastX) * 0.004, -1.2, 1.2);
       lastX = e.clientX;
     }
   };
@@ -144,15 +111,9 @@ export function createFountainScene(canvas: HTMLCanvasElement, opts: Options): S
 
   // ---------- Loop ----------
   const timer = new THREE.Timer();
-  const look = new THREE.Vector3();
-  const tmp = new THREE.Vector3();
-  const world = new THREE.Vector3();
-  const axis = new THREE.Vector3();
-  const edge = new THREE.Vector3();
   let elapsed = 0;
-  let spin = 0;
   let smoothP = getProgress();
-  let rotation = smoothP * Math.PI * 2;
+  let rotation = -0.55;
 
   const frame = () => {
     timer.update();
@@ -161,79 +122,29 @@ export function createFountainScene(canvas: HTMLCanvasElement, opts: Options): S
     uTime.value = elapsed;
 
     // Ease toward scroll progress so wheel steps feel like a camera move, not a jump.
-    smoothP += (getProgress() - smoothP) * (1 - Math.exp(-dt * 7));
+    smoothP += (getProgress() - smoothP) * (1 - Math.exp(-dt * 6));
     const p = smoothP;
 
-    if (!reducedMotion) spin += dt * 0.12;
-    spin += dragVelocity;
-    dragVelocity *= Math.exp(-dt * 4);
-    const free = spin + p * Math.PI * 2.2 - 0.5;
-    // While the water is on, settle on a side-on angle so the arc reads left to right.
-    const lock = smooth(0.6, 0.68, p) * (1 - smooth(0.85, 0.92, p));
-    const presented = Math.round(free / (Math.PI * 2)) * Math.PI * 2 - 0.3 + Math.sin(elapsed * 0.35) * 0.12;
-    const targetRotation = free + (presented - free) * lock;
-    rotation += (targetRotation - rotation) * (1 - Math.exp(-dt * 6));
-    fountain.rotation.y = rotation;
+    // Scroll turns it from a left three-quarter view to a right one. The back is a wall plate,
+    // so it never spins all the way around.
+    if (!dragging) dragOffset *= Math.exp(-dt * 1.5);
+    const sway = reducedMotion ? 0 : Math.sin(elapsed * 0.25) * 0.08;
+    const target = -0.55 + p * 1.1 + sway + dragOffset;
+    rotation += (target - rotation) * (1 - Math.exp(-dt * 5));
+    turntable.rotation.y = rotation;
 
-    // Exploded view
-    const explode = smooth(0.15, 0.3, p) * (1 - smooth(0.54, 0.64, p));
-    const e = easeInOut(explode);
-    for (const [name, part] of Object.entries(parts)) {
-      const [x, y, z] = EXPLODE[name as PartName];
-      part.position.set(x * e, y * e, z * e);
-    }
-    parts.guard.rotation.z = -0.35 * e;
-    parts.bubbler.rotation.z = 0.2 * e;
-
-    // Water turns on after reassembly
-    uWater.value = smooth(0.64, 0.72, p);
-    water.update(elapsed, uWater.value);
-
-    // Float and tilt
     pointer.lerp(pointerTarget, 1 - Math.exp(-dt * 3));
-    rig.position.y = (reducedMotion ? 0 : Math.sin(elapsed * 0.7) * 0.035) + smooth(0.86, 1, p) * 0.6;
-    rig.rotation.x = pointer.y * 0.05;
-    rig.rotation.z = -pointer.x * 0.025;
+    rig.position.y = reducedMotion ? 0 : Math.sin(elapsed * 0.6) * 0.03;
+    rig.rotation.x = pointer.y * 0.04;
+    rig.rotation.z = -pointer.x * 0.02;
 
-    // Camera
-    const [camY, distK, lookY, skew] = sampleKeys(CAMERA_KEYS, p);
-    const base = wide ? 7.4 : 11;
-    camera.position.set(Math.sin(pointer.x * 0.15) * 0.4, camY, base * distK);
-    look.set(0, lookY, 0);
-    camera.lookAt(look);
-    camera.updateProjectionMatrix();
-    // Shift the subject sideways in the frame without changing perspective.
-    camera.projectionMatrix.elements[8] = wide ? skew : 0;
-    camera.projectionMatrix.elements[9] = wide ? 0 : smooth(0.6, 0.7, p) * (1 - smooth(0.84, 0.95, p)) * -0.35;
-    camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
-    camera.updateMatrixWorld();
+    const dist = (wide ? 7.6 : 10.6) * (1 - 0.1 * p);
+    camera.position.set(Math.sin(pointer.x * 0.15) * 0.35, 1.1 + p * 0.5, dist);
+    camera.lookAt(0, wide ? 0.05 : -0.2, 0);
 
+    water.update(elapsed);
     dust.update(elapsed);
     renderer.render(scene, camera);
-
-    // Place annotation labels on their parts. Each label sits on the side of the model its part
-    // is on, and its leader line stretches until the text clears the silhouette.
-    for (let i = 0; i < annotations.length; i++) {
-      const a = annotations[i];
-      a.part.localToWorld(world.copy(a.local));
-      const y0 = world.y;
-      tmp.copy(world).project(camera);
-      const x = (tmp.x * 0.5 + 0.5) * width;
-      const y = (-tmp.y * 0.5 + 0.5) * height;
-      axis.set(0, y0, 0).project(camera);
-      const cx = (axis.x * 0.5 + 0.5) * width;
-      edge.set(0.62, y0, 0).project(camera);
-      const halfWidth = Math.abs((edge.x - axis.x) * 0.5 * width);
-      const dx = x - cx;
-      if (Math.abs(dx) > 6) a.side = dx > 0 ? "right" : "left";
-      const line = Math.min(Math.max(halfWidth + 28 - Math.abs(dx), wide ? 36 : 18), 320);
-      const show = smooth(0.62 + i * 0.05, 0.8 + i * 0.05, explode);
-      a.el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
-      a.el.style.opacity = show.toFixed(3);
-      a.el.style.setProperty("--reveal", show.toFixed(3));
-      a.el.style.setProperty("--line", `${line.toFixed(0)}px`);
-      if (a.el.dataset.side !== a.side) a.el.dataset.side = a.side;
-    }
   };
 
   let running = false;
@@ -275,298 +186,488 @@ export function createFountainScene(canvas: HTMLCanvasElement, opts: Options): S
 }
 
 // =====================================================================
-// Model
+// Model (all dimensions in inches; x = along the wall, y = up, z = out from the wall)
 // =====================================================================
 
-function buildFountain(): Record<PartName, THREE.Group> {
-  const grain = brushedTexture();
-  const brushed = new THREE.MeshPhysicalMaterial({
-    color: "#c9cacc",
-    metalness: 1,
-    roughness: 1,
-    roughnessMap: grain,
-    bumpMap: grain,
-    bumpScale: 0.6,
-  });
-  const polished = new THREE.MeshPhysicalMaterial({
-    color: "#e4e5e7",
-    metalness: 1,
-    roughness: 1,
-    roughnessMap: smudgeTexture(),
-  });
-  const chrome = new THREE.MeshPhysicalMaterial({ color: "#f0f0f0", metalness: 1, roughness: 0.06 });
-  const castSteel = new THREE.MeshPhysicalMaterial({ color: "#9a9b9e", metalness: 1, roughness: 0.48 });
-  const shadowGap = new THREE.MeshStandardMaterial({ color: "#050505", roughness: 0.9 });
-  const rubber = new THREE.MeshStandardMaterial({ color: "#121212", roughness: 0.75 });
+type Materials = ReturnType<typeof makeMaterials>;
 
-  const group = () => new THREE.Group();
-  const parts = {
-    base: group(),
-    pedestal: group(),
-    panel: group(),
-    bowl: group(),
-    drain: group(),
-    bubbler: group(),
-    guard: group(),
-    button: group(),
-  } satisfies Record<PartName, THREE.Group>;
-  const add = (part: THREE.Group, mesh: THREE.Mesh, at?: [number, number, number]) => {
+function makeMaterials() {
+  // Stainless with a horizontal brushed grain. Extrude UVs are in inches, so the grain is scaled to match.
+  const grain = brushedTexture(1 / 20);
+  const grainSideways = brushedTexture(1 / 20);
+  grainSideways.center.set(0.5, 0.5);
+  grainSideways.rotation = Math.PI / 2;
+  const brushed = (map: THREE.Texture) =>
+    new THREE.MeshPhysicalMaterial({ color: "#c4c6c9", metalness: 1, roughness: 1, roughnessMap: map, bumpMap: map, bumpScale: 0.4 });
+  return {
+    cabinet: brushed(grain),
+    housing: brushed(grainSideways),
+    basin: new THREE.MeshPhysicalMaterial({ color: "#dcdde0", metalness: 1, roughness: 1, roughnessMap: smudgeTexture() }),
+    chrome: new THREE.MeshPhysicalMaterial({ color: "#f2f2f2", metalness: 1, roughness: 0.07 }),
+    satin: new THREE.MeshPhysicalMaterial({ color: "#b9bbbe", metalness: 1, roughness: 0.3 }),
+    gap: new THREE.MeshStandardMaterial({ color: "#060606", roughness: 0.9 }),
+    plastic: new THREE.MeshPhysicalMaterial({ color: "#161616", roughness: 0.45, clearcoat: 0.6, clearcoatRoughness: 0.3 }),
+  };
+}
+
+function buildFountain(model: THREE.Group, uTime: { value: number }, counter: number, env: THREE.Texture) {
+  const m = makeMaterials();
+  const add = (parent: THREE.Object3D, mesh: THREE.Mesh, at?: [number, number, number]) => {
     if (at) mesh.position.set(...at);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    part.add(mesh);
+    parent.add(mesh);
     return mesh;
   };
 
-  // --- Floor flange with four bolts ---
-  add(
-    parts.base,
-    new THREE.Mesh(
-      lathe(
-        [
-          [0.001, 0],
-          [0.42, 0],
-          [0.425, 0.012],
-          [0.415, 0.04],
-          [0.33, 0.052],
-          [0.001, 0.052],
-        ],
-        128,
-        false,
-      ),
-      castSteel,
-    ),
-  );
-  for (let i = 0; i < 4; i++) {
-    const a = Math.PI / 4 + (i * Math.PI) / 2;
-    const x = Math.cos(a) * 0.35;
-    const z = Math.sin(a) * 0.35;
-    add(parts.base, new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.034, 0.006, 32), chrome), [x, 0.045, z]);
-    const bolt = add(parts.base, new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.026, 0.026, 6), chrome), [x, 0.06, z]);
-    bolt.rotation.y = a * 1.7;
-  }
+  buildRoom(model, env);
 
-  // --- Pedestal: brushed tube with flared foot and a top cap ---
-  add(
-    parts.pedestal,
-    new THREE.Mesh(
-      lathe(
-        [
-          [0.3, 0.05],
-          [0.29, 0.075],
-          [0.235, 0.14],
-          [0.2, 0.24],
-          [0.19, 0.4],
-          [0.182, 1.4],
-          [0.178, 1.95],
-          [0.19, 1.975],
-          [0.19, 2.02],
-          [0.001, 2.03],
-        ],
-        160,
-      ),
-      brushed,
-    ),
-  );
-  // Data plate on the back
-  const plate = add(
-    parts.pedestal,
-    new THREE.Mesh(
-      new THREE.CylinderGeometry(0.1865, 0.1865, 0.13, 32, 1, true, Math.PI - 0.42, 0.84),
-      new THREE.MeshPhysicalMaterial({ map: plateTexture(), metalness: 0.85, roughness: 0.42 }),
-    ),
-    [0, 0.6, 0],
-  );
-  plate.castShadow = false;
+  const hi = buildCooler(m, add, "left");
+  hi.position.set(-UNIT_W / 2, HI_RIM, 0);
+  model.add(hi);
+  const lo = buildCooler(m, add, "right");
+  lo.position.set(UNIT_W / 2, LO_RIM, 0);
+  model.add(lo);
 
-  // --- Access panel on the front, with a dark shadow gap and four screws ---
-  const panelArc = 0.95;
-  const panelStart = -panelArc / 2; // centered on +z
-  add(
-    parts.pedestal,
-    new THREE.Mesh(new THREE.CylinderGeometry(0.1835, 0.1835, 0.6, 48, 1, true, panelStart - 0.03, panelArc + 0.06), shadowGap),
-    [0, 1.12, 0],
-  );
-  add(
-    parts.panel,
-    new THREE.Mesh(new THREE.CylinderGeometry(0.1865, 0.1865, 0.585, 48, 1, true, panelStart, panelArc), brushed),
-    [0, 1.12, 0],
-  );
-  for (const [ay, ax] of [
-    [1.38, -0.36],
-    [1.38, 0.36],
-    [0.86, -0.36],
-    [0.86, 0.36],
-  ]) {
-    const screw = add(parts.panel, new THREE.Mesh(new THREE.SphereGeometry(0.011, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), chrome));
-    screw.position.set(Math.sin(ax) * 0.187, ay, Math.cos(ax) * 0.187);
-    screw.lookAt(screw.position.clone().multiplyScalar(2).setY(ay));
-    screw.rotateX(Math.PI / 2);
-  }
+  const filler = buildBottleFiller(m, add, counter);
+  filler.position.set(-UNIT_W / 2, HI_RIM + 3.2, 0);
+  model.add(filler);
 
-  // --- Bowl: polished, rolled rim, skirt down to the pedestal ---
-  add(
-    parts.bowl,
-    new THREE.Mesh(
-      lathe(
-        [
-          [0.19, 1.99],
-          [0.24, 2.0],
-          [0.36, 2.06],
-          [0.455, 2.14],
-          [0.5, 2.21],
-          [0.515, 2.252],
-          [0.512, 2.276],
-          [0.497, 2.284],
-          [0.483, 2.27],
-          [0.45, 2.21],
-          [0.36, 2.15],
-          [0.24, 2.115],
-          [0.12, 2.1],
-          [0.06, 2.097],
-          [0.001, 2.096],
-        ],
-        180,
-      ),
-      polished,
-    ),
-  );
-
-  // --- Strainer: dark drain with radial slots ---
-  add(parts.drain, new THREE.Mesh(new THREE.CircleGeometry(0.052, 48).rotateX(-Math.PI / 2), shadowGap), [0, 2.099, 0]);
-  add(parts.drain, new THREE.Mesh(new THREE.TorusGeometry(0.054, 0.006, 10, 48).rotateX(Math.PI / 2), chrome), [0, 2.1, 0]);
-  for (let i = 0; i < 6; i++) {
-    const bar = add(parts.drain, new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.004, 0.008), chrome), [0, 2.101, 0]);
-    bar.rotation.y = (i * Math.PI) / 6;
-  }
-
-  // --- Bubbler: shank, domed head, orifice ---
-  add(parts.bubbler, new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.036, 0.11, 40), chrome), [-0.3, 2.175, 0]);
-  add(parts.bubbler, new THREE.Mesh(new THREE.CylinderGeometry(0.044, 0.044, 0.01, 40), chrome), [-0.3, 2.13, 0]);
-  const head = add(parts.bubbler, new THREE.Mesh(new THREE.SphereGeometry(0.042, 48, 24), chrome), [-0.296, 2.238, 0]);
-  head.scale.set(1.15, 0.72, 1);
-  const orifice = add(parts.bubbler, new THREE.Mesh(new THREE.CircleGeometry(0.008, 24), shadowGap));
-  orifice.position.copy(NOZZLE).add(new THREE.Vector3(-0.003, -0.002, 0));
-  orifice.lookAt(orifice.position.clone().add(new THREE.Vector3(0.6, 1, 0)));
-
-  // --- Guard: bent rod arching over the bubbler ---
-  const guardCurve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(-0.37, 2.13, -0.075),
-    new THREE.Vector3(-0.37, 2.25, -0.07),
-    new THREE.Vector3(-0.35, 2.31, 0),
-    new THREE.Vector3(-0.37, 2.25, 0.07),
-    new THREE.Vector3(-0.37, 2.13, 0.075),
-  ]);
-  add(parts.guard, new THREE.Mesh(new THREE.TubeGeometry(guardCurve, 80, 0.0085, 14), chrome));
-
-  // --- Push button on the front of the bowl ---
-  const buttonAt = (z: number) => [0, 2.17, z] as [number, number, number];
-  add(parts.button, new THREE.Mesh(new THREE.CylinderGeometry(0.066, 0.072, 0.07, 48).rotateX(Math.PI / 2), polished), buttonAt(0.47));
-  add(parts.button, new THREE.Mesh(new THREE.TorusGeometry(0.053, 0.007, 12, 48), rubber), buttonAt(0.505));
-  add(parts.button, new THREE.Mesh(new THREE.CylinderGeometry(0.046, 0.046, 0.022, 48).rotateX(Math.PI / 2), chrome), buttonAt(0.512));
-
-  return parts;
+  // Water runs on the high side only.
+  const water = buildWater(uTime, env);
+  hi.add(water.group);
+  return water;
 }
 
-function buildWater(uTime: { value: number }, uOn: { value: number }) {
+// Where the bubbler sits in a cooler's local space (x across, z out from the wall).
+// It stands on a flat ledge in the front corner of the basin and throws its arc back toward the drain.
+const BUBBLER_AT = new THREE.Vector3(5.0, 0, 15.4);
+const LANDING_AT = new THREE.Vector3(0.5, 0, 11.2);
+const STREAM_R = 0.1; // a real bubbler stream is about 3/16" across
+const NOZZLE_BASE = 1.0; // height of the nozzle's root above the ledge
+const NOZZLE_LEN = 0.75;
+
+/**
+ * The stream is a true projectile arc. Time is in units where g = 1, so the shape depends only on
+ * how high the water rises above the nozzle.
+ */
+function streamPath() {
+  const RISE = 2.3;
+  const flat = new THREE.Vector3(LANDING_AT.x - BUBBLER_AT.x, 0, LANDING_AT.z - BUBBLER_AT.z);
+  const heading = flat.clone().normalize();
+  const side = new THREE.Vector3().crossVectors(heading, new THREE.Vector3(0, 1, 0)).normalize();
+  const deck = basinHeight(BUBBLER_AT.x, BUBBLER_AT.z);
+  const endY = basinHeight(LANDING_AT.x, LANDING_AT.z) - 0.03;
+  const vy = Math.sqrt(2 * RISE);
+  // The nozzle points along the launch direction, and the launch point is the nozzle's tip: iterate to agree.
+  let angle = 1.1;
+  let from = new THREE.Vector3();
+  let vx = 1;
+  let T = 1;
+  for (let i = 0; i < 4; i++) {
+    const reach = 0.15 + Math.cos(angle) * NOZZLE_LEN;
+    from = new THREE.Vector3(BUBBLER_AT.x, deck + NOZZLE_BASE + Math.sin(angle) * NOZZLE_LEN, BUBBLER_AT.z).addScaledVector(heading, reach);
+    T = vy + Math.sqrt(vy * vy + 2 * (from.y - endY));
+    vx = (flat.length() - reach) / T;
+    angle = Math.atan2(vy, vx);
+  }
+  const at = (t: number, out: THREE.Vector3) => out.copy(from).addScaledVector(heading, vx * t).setY(from.y + vy * t - 0.5 * t * t);
+  const speed = (t: number) => Math.hypot(vx, vy - t);
+  const tangent = (t: number, out: THREE.Vector3) => out.copy(heading).multiplyScalar(vx).setY(vy - t).normalize();
+  return { T, angle, heading, side, from, at, speed, tangent, end: at(T, new THREE.Vector3()) };
+}
+
+/** One cooler: sculpted basin top, brushed cabinet that tapers back to the wall, push bar, bubbler. */
+function buildCooler(m: Materials, add: AddFn, outerSide: "left" | "right") {
+  const g = new THREE.Group();
+
+  // Basin + rim as one displaced surface
+  add(g, new THREE.Mesh(basinGeometry(), m.basin));
+
+  // Cabinet: side profile extruded across the unit's width
+  const profile = new THREE.Shape();
+  const pts: [number, number][] = [
+    [0, -3.8],
+    [18.65, -3.8],
+    [18.65, -4.6],
+    [16.6, -8.4],
+    [7.6, -20.5],
+    [0, -20.5],
+  ];
+  profile.moveTo(...pts[0]);
+  for (const p of pts.slice(1)) profile.lineTo(...p);
+  profile.closePath();
+  const width = UNIT_W - 0.7;
+  const cabinet = new THREE.ExtrudeGeometry(profile, {
+    depth: width,
+    bevelEnabled: true,
+    bevelThickness: 0.35,
+    bevelSize: 0.35,
+    bevelSegments: 5,
+  });
+  cabinet.rotateY(-Math.PI / 2);
+  cabinet.translate(width / 2, 0, 0);
+  add(g, new THREE.Mesh(cabinet, m.cabinet));
+
+  // The top is a separate pan whose skirt laps over the cabinet. It is hollow, so the basin can
+  // sink below the rim without the cabinet showing through it.
+  const skirtShape = traceRoundedRect(new THREE.Shape(), UNIT_W, UNIT_D, 0.8, 0, -UNIT_D);
+  skirtShape.holes.push(traceRoundedRect(new THREE.Path(), UNIT_W - 0.5, UNIT_D - 0.5, 0.6, 0, -UNIT_D + 0.25));
+  const skirt = new THREE.ExtrudeGeometry(skirtShape, { depth: 3.3, bevelEnabled: false, curveSegments: 12 });
+  skirt.rotateX(-Math.PI / 2);
+  add(g, new THREE.Mesh(skirt, m.housing), [0, -3.6, 0]);
+
+  // Front push bar, with a dark shadow gap around it
+  add(g, new THREE.Mesh(roundedBox(14.6, 2.3, 0.3, 0.12), m.gap), [0, -2.75, 18.95]);
+  add(g, new THREE.Mesh(roundedBox(14, 1.8, 0.8, 0.35), m.satin), [0, -2.75, 19.25]);
+
+  // Side push pad on the outer side
+  const sx = outerSide === "left" ? -1 : 1;
+  add(g, new THREE.Mesh(roundedBox(0.3, 2.3, 4.8, 0.12), m.gap), [sx * 9.02, -2.75, 14.6]);
+  add(g, new THREE.Mesh(roundedBox(0.7, 1.8, 4.2, 0.3), m.satin), [sx * 9.2, -2.75, 14.6]);
+
+  // Drain with strainer bars
+  const drainY = basinHeight(0, DRAIN_Z);
+  const drain = new THREE.Group();
+  drain.position.set(0, drainY + 0.02, DRAIN_Z);
+  g.add(drain);
+  add(drain, new THREE.Mesh(new THREE.CircleGeometry(0.85, 40).rotateX(-Math.PI / 2), m.gap));
+  add(drain, new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.09, 10, 48).rotateX(Math.PI / 2), m.chrome));
+  for (let i = 0; i < 4; i++) {
+    const bar = add(drain, new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.08, 0.14), m.chrome), [0, 0.02, 0]);
+    bar.rotation.y = (i * Math.PI) / 4;
+  }
+
+  g.add(buildBubbler(m, add));
+
+  return g;
+}
+
+/**
+ * The bubbler: a chrome body on a flange, the little nozzle the water leaves from, and the hood
+ * that keeps mouths off it. Built facing +z, then turned to face the drain.
+ */
+function buildBubbler(m: Materials, add: AddFn) {
+  const path = streamPath();
+  const b = new THREE.Group();
+  b.position.set(BUBBLER_AT.x, basinHeight(BUBBLER_AT.x, BUBBLER_AT.z), BUBBLER_AT.z);
+  b.rotation.y = Math.atan2(path.heading.x, path.heading.z);
+
+  // Body: flange, a short waist, and a domed head, turned as one piece.
+  const profile: [number, number][] = [
+    [0, 0], [0.95, 0], [0.97, 0.06], [0.95, 0.12], [0.76, 0.19], [0.62, 0.3], [0.57, 0.5], [0.56, 0.8],
+    [0.52, 0.98], [0.43, 1.12], [0.29, 1.21], [0.14, 1.25], [0, 1.26],
+  ];
+  add(b, new THREE.Mesh(new THREE.LatheGeometry(profile.map(([r, y]) => new THREE.Vector2(r, y)), 64), m.chrome));
+  // Gasket between flange and steel.
+  add(b, new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, 0.04, 48), m.plastic), [0, 0.0, 0]);
+
+  // Nozzle: a tapered spout with a knurled collar, aimed exactly along the stream's launch direction.
+  const aim = new THREE.Vector3(0, Math.sin(path.angle), Math.cos(path.angle));
+  const nozzle = new THREE.Group();
+  nozzle.position.set(0, NOZZLE_BASE, 0.15);
+  nozzle.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), aim);
+  b.add(nozzle);
+  const spout: [number, number][] = [
+    [0.2, 0], [0.2, NOZZLE_LEN - 0.3], [0.165, NOZZLE_LEN - 0.22], [0.15, NOZZLE_LEN - 0.03], [0.135, NOZZLE_LEN],
+    [STREAM_R + 0.012, NOZZLE_LEN], [STREAM_R + 0.012, NOZZLE_LEN - 0.12],
+  ];
+  add(nozzle, new THREE.Mesh(new THREE.LatheGeometry(spout.map(([r, y]) => new THREE.Vector2(r, y)), 40), m.chrome));
+  const collar = add(nozzle, new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.16, 12), m.satin), [0, NOZZLE_LEN - 0.42, 0]);
+  collar.rotation.y = 0.3;
+  add(nozzle, new THREE.Mesh(new THREE.CircleGeometry(STREAM_R + 0.012, 24).rotateX(-Math.PI / 2), m.gap), [0, NOZZLE_LEN - 0.12, 0]);
+
+  // Hood: a chrome shell cupped behind and over the nozzle; the stream leaves through the open side.
+  const hoodMat = m.chrome.clone();
+  hoodMat.side = THREE.DoubleSide;
+  const hood = add(b, new THREE.Mesh(new THREE.SphereGeometry(0.44, 48, 20, 0, Math.PI * 2, 0, 1.0), hoodMat));
+  hood.position.copy(nozzle.position).addScaledVector(aim, NOZZLE_LEN * 0.3);
+  hood.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0.35, -0.94).normalize());
+  hood.scale.set(1.08, 1, 1);
+  return b;
+}
+
+type AddFn = (parent: THREE.Object3D, mesh: THREE.Mesh, at?: [number, number, number]) => THREE.Mesh;
+
+const DRAIN_Z = 12.4;
+
+function sdRoundRect(x: number, z: number, hx: number, hz: number, r: number) {
+  const qx = Math.abs(x) - (hx - r);
+  const qz = Math.abs(z) - (hz - r);
+  return Math.hypot(Math.max(qx, 0), Math.max(qz, 0)) + Math.min(Math.max(qx, qz), 0) - r;
+}
+
+function smoothstep(e0: number, e1: number, x: number) {
+  const t = Math.min(Math.max((x - e0) / (e1 - e0), 0), 1);
+  return t * t * (3 - 2 * t);
+}
+
+/** Height of the cooler top at (x, z): flat rim, a rounded bead, then a dished basin sloping to the drain. */
+function basinHeight(x: number, z: number) {
+  const dOuter = sdRoundRect(x, z - UNIT_D / 2, UNIT_W / 2, UNIT_D / 2, 0.8);
+  const dIn = sdRoundRect(x, z - 10.4, 7.2, 7.4, 3.2);
+  // The bubbler stands on a flat ledge that pushes into the basin's front corner.
+  const ledge = smoothstep(1.25, 3.3, Math.hypot(x - BUBBLER_AT.x, z - BUBBLER_AT.z));
+  const dish = smoothstep(0, 3.4, -dIn) * ledge;
+  const drainDip = Math.exp(-(x * x + (z - DRAIN_Z) ** 2) / 7);
+  const bead = 0.14 * Math.exp(-(dIn * dIn) / 0.12);
+  const roll = 0.5 * smoothstep(-0.7, 0, dOuter);
+  return -2.5 * dish - 0.55 * dish * drainDip + bead - roll;
+}
+
+function basinGeometry() {
+  const geo = new THREE.PlaneGeometry(UNIT_W, UNIT_D, 150, 158);
+  geo.rotateX(-Math.PI / 2); // plane now lies in x/z, with z running -9.5..9.5
+  geo.translate(0, 0, UNIT_D / 2);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) pos.setY(i, basinHeight(pos.getX(i), pos.getZ(i)));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/** Bottle-filling station: brushed housing with a recessed alcove, spout, sensor, drip tray, counter display. */
+function buildBottleFiller(m: Materials, add: AddFn, counter: number) {
+  const g = new THREE.Group();
+  const W = 16;
+  const H = 25;
+  const D = 4.6;
+  const outer = traceRoundedRect(new THREE.Shape(), W, H, 1.4);
+  outer.holes.push(traceRoundedRect(new THREE.Path(), 11.6, 13.4, 1.0, 0, 3.2));
+  const housing = new THREE.ExtrudeGeometry(outer, {
+    depth: D,
+    bevelEnabled: true,
+    bevelThickness: 0.35,
+    bevelSize: 0.35,
+    bevelSegments: 5,
+    curveSegments: 16,
+  });
+  add(g, new THREE.Mesh(housing, m.housing));
+
+  // Alcove back wall, spout, sensor, drip tray
+  add(g, new THREE.Mesh(new THREE.PlaneGeometry(11.6, 13.4), m.plastic), [0, 3.2 + 6.7, 1.2]);
+  add(g, new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 0.9, 28), m.chrome), [0, 16.6 - 0.45, 2.9]);
+  add(g, new THREE.Mesh(new THREE.CircleGeometry(0.2, 16).rotateX(Math.PI / 2), m.gap), [0, 16.6 - 0.91, 2.9]);
+  add(g, new THREE.Mesh(roundedBox(1.6, 0.6, 0.3, 0.12), m.plastic), [3.3, 15.4, 1.35]);
+  const tray = add(
+    g,
+    new THREE.Mesh(
+      new THREE.BoxGeometry(11.2, 0.35, 3.8),
+      new THREE.MeshStandardMaterial({ map: trayTexture(), roughness: 0.6, metalness: 0.3 }),
+    ),
+    [0, 3.35, 2.9],
+  );
+  tray.castShadow = false;
+
+  // Display: glossy black glass with an LED counter
+  add(g, new THREE.Mesh(roundedBox(12.4, 5.2, 0.3, 0.2), m.plastic), [0, 20.6, D + 0.4]);
+  const screen = new THREE.Mesh(
+    new THREE.PlaneGeometry(12, 4.8),
+    new THREE.MeshPhysicalMaterial({
+      color: "#000000",
+      roughness: 0.05,
+      clearcoat: 1,
+      emissive: "#ffffff",
+      emissiveMap: displayTexture(counter),
+      emissiveIntensity: 1.5,
+    }),
+  );
+  screen.position.set(0, 20.6, D + 0.62);
+  g.add(screen);
+  return g;
+}
+
+function buildWater(uTime: { value: number }, env: THREE.Texture) {
   const group = new THREE.Group();
-  const curve = new THREE.QuadraticBezierCurve3(NOZZLE, new THREE.Vector3(-0.07, 2.53, 0), IMPACT);
-  const TUBE_SEGMENTS = 160;
-  const RADIAL = 16;
+  const path = streamPath();
+
+  // ---------- The stream: a tube reshaped every frame ----------
+  // Its radius follows continuity (slow water at the top of the arc is thicker, falling water thins),
+  // and surface-tension ripples grow as they ride downstream until the jet is close to breaking up.
+  const SEG = 180;
+  const RAD = 14;
+  const ring = RAD + 1;
+  const positions = new Float32Array((SEG + 1) * ring * 3);
+  const normals = new Float32Array((SEG + 1) * ring * 3);
+  const uvs = new Float32Array((SEG + 1) * ring * 2);
+  const index: number[] = [];
+  for (let i = 0; i <= SEG; i++)
+    for (let j = 0; j <= RAD; j++) {
+      uvs.set([i / SEG, j / RAD], (i * ring + j) * 2);
+      if (i < SEG && j < RAD) {
+        const a = i * ring + j;
+        index.push(a, a + ring, a + 1, a + 1, a + ring, a + ring + 1);
+      }
+    }
+  const stream = new THREE.BufferGeometry();
+  stream.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  stream.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
+  stream.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+  stream.setIndex(index);
+
+  const FLOW = path.T / 0.36; // the water is in the air for about a third of a second
+  const v0 = path.speed(0);
+  const center = new THREE.Vector3();
+  const tan = new THREE.Vector3();
+  const lift = new THREE.Vector3();
+  const shapeStream = (time: number) => {
+    for (let i = 0; i <= SEG; i++) {
+      const u = i / SEG;
+      const t = u * path.T;
+      path.at(t, center);
+      path.tangent(t, tan);
+      lift.crossVectors(path.side, tan);
+      const grow = smoothstep(0.12, 1, u);
+      const phase = t - time * FLOW; // features are carried along at the water's own speed
+      const ripple = grow * (0.13 * Math.sin(phase * 15) + 0.08 * Math.sin(phase * 6.3 + 1.3) + 0.05 * Math.sin(phase * 27 + 0.4));
+      const r = STREAM_R * Math.min(Math.sqrt(v0 / path.speed(t)), 1.5) * (1 + ripple);
+      center.addScaledVector(path.side, grow * 0.03 * Math.sin(phase * 3.7 + 0.7));
+      center.addScaledVector(lift, grow * 0.02 * Math.sin(phase * 4.9));
+      for (let j = 0; j <= RAD; j++) {
+        const a = (j / RAD) * Math.PI * 2;
+        const c = Math.cos(a);
+        const s = Math.sin(a);
+        const o = (i * ring + j) * 3;
+        const nx = c * path.side.x + s * lift.x;
+        const ny = c * path.side.y + s * lift.y;
+        const nz = c * path.side.z + s * lift.z;
+        normals[o] = nx;
+        normals[o + 1] = ny;
+        normals[o + 2] = nz;
+        positions[o] = center.x + nx * r;
+        positions[o + 1] = center.y + ny * r;
+        positions[o + 2] = center.z + nz * r;
+      }
+    }
+    stream.attributes.position.needsUpdate = true;
+    stream.attributes.normal.needsUpdate = true;
+  };
+  shapeStream(0);
+  stream.computeBoundingSphere();
 
   // Clear water body: refraction + reflections, no color.
-  const bodyGeo = new THREE.TubeGeometry(curve, TUBE_SEGMENTS, 0.015, RADIAL);
-  const body = new THREE.Mesh(
-    bodyGeo,
+  group.add(
+    new THREE.Mesh(
+      stream,
+      new THREE.MeshPhysicalMaterial({
+        color: "#ffffff",
+        metalness: 0,
+        roughness: 0.015,
+        transmission: 1,
+        thickness: 0.35,
+        ior: 1.33,
+        envMap: env,
+        envMapIntensity: 2.4,
+      }),
+    ),
+  );
+
+  // Glints: a bright rim where the stream turns away from the eye, and streaks carried downstream.
+  group.add(
+    new THREE.Mesh(
+      stream,
+      new THREE.ShaderMaterial({
+        uniforms: { uTime, uFlow: { value: FLOW / path.T } },
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        vertexShader: /* glsl */ `
+          varying vec2 vUv;
+          varying vec3 vN;
+          varying vec3 vV;
+          void main() {
+            vUv = uv;
+            vec4 mv = modelViewMatrix * vec4(position + normal * 0.004, 1.0);
+            vV = -mv.xyz;
+            vN = normalMatrix * normal;
+            gl_Position = projectionMatrix * mv;
+          }
+        `,
+        fragmentShader: /* glsl */ `
+          uniform float uTime;
+          uniform float uFlow;
+          varying vec2 vUv;
+          varying vec3 vN;
+          varying vec3 vV;
+          void main() {
+            float facing = abs(dot(normalize(vN), normalize(vV)));
+            float rim = pow(1.0 - facing, 2.5);
+            // A tube of water acts as a lens: one sharp line of light runs along it.
+            float line = smoothstep(0.035, 0.0, abs(vUv.y - 0.22)) + 0.5 * smoothstep(0.02, 0.0, abs(vUv.y - 0.7));
+            float along = vUv.x - uTime * uFlow;
+            float streak = pow(max(sin(along * 70.0 + sin(vUv.y * 6.2831) * 0.8), 0.0), 12.0);
+            float a = 0.05 + rim * 0.55 + line * (0.35 + 0.3 * streak) + streak * 0.12 * smoothstep(0.1, 0.6, vUv.x);
+            a *= smoothstep(0.0, 0.015, vUv.x) * smoothstep(1.0, 0.985, vUv.x);
+            gl_FragColor = vec4(vec3(1.0), a);
+          }
+        `,
+      }),
+    ),
+  );
+
+  // ---------- The water in the basin ----------
+  // A clear film lying on the steel, from where the stream lands down to the drain. Clear water only
+  // adds reflections, so the film is drawn additively: black, mirror-smooth, and reshaped by ripples.
+  const N = 80;
+  const HALF = 4.4;
+  const film = new THREE.PlaneGeometry(HALF * 2, HALF * 2, N, N);
+  film.rotateX(-Math.PI / 2);
+  film.translate(0.4, 0, 11.8);
+  const fp = film.attributes.position as THREE.BufferAttribute;
+  const cover = new Float32Array(fp.count);
+  const restY = new Float32Array(fp.count);
+  const fromLanding = new Float32Array(fp.count);
+  const colors = new Float32Array(fp.count * 4);
+  for (let i = 0; i < fp.count; i++) {
+    const x = fp.getX(i);
+    const z = fp.getZ(i);
+    const dL = Math.hypot(x - path.end.x, z - path.end.z);
+    const dD = Math.hypot(x, z - DRAIN_Z);
+    // Wet around the landing and around the drain, with the drain itself left open.
+    cover[i] = Math.max(smoothstep(3.6, 1.0, dL), smoothstep(2.8, 1.1, dD)) * smoothstep(0.75, 1.15, dD);
+    restY[i] = basinHeight(x, z);
+    fromLanding[i] = dL;
+    colors.set([1, 1, 1, cover[i]], i * 4);
+  }
+  film.setAttribute("color", new THREE.BufferAttribute(colors, 4));
+  const shapeFilm = (time: number) => {
+    for (let i = 0; i < fp.count; i++) {
+      const d = fromLanding[i];
+      const x = fp.getX(i);
+      const z = fp.getZ(i);
+      const rings = 0.055 * Math.sin(d * 10 - time * 14) * Math.exp(-d * 0.5);
+      const chop = 0.018 * Math.sin(x * 5.1 + time * 3.1) * Math.sin(z * 4.3 - time * 2.3);
+      const mound = 0.07 * Math.exp(-(d * d) / 0.1);
+      fp.setY(i, restY[i] - 0.02 + cover[i] * (0.05 + rings + chop + mound));
+    }
+    fp.needsUpdate = true;
+    film.computeVertexNormals();
+  };
+  shapeFilm(0);
+  const filmMesh = new THREE.Mesh(
+    film,
     new THREE.MeshPhysicalMaterial({
-      color: "#ffffff",
+      color: "#000000",
       metalness: 0,
-      roughness: 0.02,
-      transmission: 1,
-      thickness: 0.03,
-      ior: 1.33,
-      envMapIntensity: 2.2,
-    }),
-  );
-  group.add(body);
-
-  // Moving highlights riding the surface of the stream.
-  const sheenGeo = new THREE.TubeGeometry(curve, TUBE_SEGMENTS, 0.0158, RADIAL);
-  const sheen = new THREE.Mesh(
-    sheenGeo,
-    new THREE.ShaderMaterial({
-      uniforms: { uTime, uOn },
+      roughness: 0.03,
+      vertexColors: true,
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
-      vertexShader: /* glsl */ `
-        uniform float uTime;
-        varying vec2 vUv;
-        varying vec3 vN;
-        varying vec3 vV;
-        void main() {
-          vUv = uv;
-          vec3 p = position + normal * 0.0012 * sin(uv.x * 90.0 - uTime * 30.0);
-          vec4 mv = modelViewMatrix * vec4(p, 1.0);
-          vV = -mv.xyz;
-          vN = normalMatrix * normal;
-          gl_Position = projectionMatrix * mv;
-        }
-      `,
-      fragmentShader: /* glsl */ `
-        uniform float uTime;
-        uniform float uOn;
-        varying vec2 vUv;
-        varying vec3 vN;
-        varying vec3 vV;
-        void main() {
-          float fr = pow(clamp(1.0 - abs(dot(normalize(vN), normalize(vV))), 0.0, 1.0), 3.0);
-          float streak = pow(max(sin(vUv.x * 46.0 - uTime * 20.0 + sin(vUv.y * 6.2831) * 0.6), 0.0), 10.0);
-          float a = (0.08 + fr * 0.9 + streak * 0.55) * smoothstep(0.0, 0.03, vUv.x) * smoothstep(1.0, 0.97, vUv.x);
-          gl_FragColor = vec4(vec3(1.0), a * uOn);
-        }
-      `,
+      // Brighter than water's true 2% reflectance, so the ripples read at the size they are on screen.
+      ior: 2,
+      envMap: env,
+      envMapIntensity: 3,
     }),
   );
-  group.add(sheen);
+  group.add(filmMesh);
 
-  // Ripples in the film of water around the landing point.
-  const pool = new THREE.Mesh(
-    new THREE.CircleGeometry(0.27, 96),
-    new THREE.ShaderMaterial({
-      uniforms: { uTime, uOn, uImpact: { value: new THREE.Vector2(IMPACT.x, -IMPACT.z) } },
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      vertexShader: /* glsl */ `
-        varying vec2 vP;
-        void main() { vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
-      `,
-      fragmentShader: /* glsl */ `
-        uniform float uTime;
-        uniform float uOn;
-        uniform vec2 uImpact;
-        varying vec2 vP;
-        void main() {
-          float d = length(vP - uImpact);
-          float rip = pow(max(sin(d * 110.0 - uTime * 12.0) * 0.5 + 0.5, 0.0), 6.0) * exp(-d * 9.0);
-          float edge = smoothstep(0.27, 0.12, length(vP));
-          gl_FragColor = vec4(vec3(1.0), (rip * 0.4 + exp(-d * 40.0) * 0.25) * edge * uOn);
-        }
-      `,
-    }),
-  );
-  pool.rotation.x = -Math.PI / 2;
-  pool.position.y = POOL_Y;
-  group.add(pool);
-
-  // Fine splash at the landing point.
+  // ---------- Droplets thrown up where the stream lands ----------
   const COUNT = 70;
-  const positions = new Float32Array(COUNT * 3);
+  const dropPos = new Float32Array(COUNT * 3);
   const alphas = new Float32Array(COUNT);
   const seeds = Array.from({ length: COUNT }, () => [Math.random(), Math.random(), Math.random(), Math.random()]);
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute("position", new THREE.BufferAttribute(dropPos, 3));
   geo.setAttribute("aAlpha", new THREE.BufferAttribute(alphas, 1));
   const splash = new THREE.Points(
     geo,
@@ -582,7 +683,7 @@ function buildWater(uTime: { value: number }, uOn: { value: number }) {
         void main() {
           vAlpha = aAlpha;
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = uScale * 18.0 / -mv.z;
+          gl_PointSize = uScale * 13.0 / -mv.z;
           gl_Position = projectionMatrix * mv;
         }
       `,
@@ -598,25 +699,21 @@ function buildWater(uTime: { value: number }, uOn: { value: number }) {
   splash.frustumCulled = false;
   group.add(splash);
 
-  const fullCount = bodyGeo.index!.count;
-  const update = (t: number, on: number) => {
-    // The stream grows out of the nozzle as the water turns on.
-    const n = Math.floor((fullCount * on) / (RADIAL * 6)) * RADIAL * 6;
-    bodyGeo.setDrawRange(0, n);
-    sheenGeo.setDrawRange(0, n);
-    group.visible = on > 0.001;
-    const landed = on > 0.98 ? 1 : 0;
+  const update = (t: number) => {
+    shapeStream(t);
+    shapeFilm(t);
     for (let i = 0; i < COUNT; i++) {
       const [a, b, c, d] = seeds[i];
-      const life = 0.35 + b * 0.35;
+      const life = 0.22 + b * 0.22;
       const age = ((a + t / life) % 1) * life;
       const angle = c * Math.PI * 2;
-      const out = 0.15 + d * 0.3;
-      const y = IMPACT.y + (0.35 + b * 0.5) * age - 2.4 * age * age;
-      positions[i * 3] = IMPACT.x + Math.cos(angle) * out * age + 0.03 * age;
-      positions[i * 3 + 1] = Math.max(y, POOL_Y);
-      positions[i * 3 + 2] = IMPACT.z + Math.sin(angle) * out * age;
-      alphas[i] = y < POOL_Y ? 0 : (1 - age / life) * 0.7 * landed;
+      const out = 1.5 + d * 4;
+      const y = (4 + b * 6) * age - 38 * age * age;
+      // Droplets keep some of the stream's forward motion.
+      dropPos[i * 3] = path.end.x + (Math.cos(angle) * out + path.heading.x * 3) * age;
+      dropPos[i * 3 + 1] = path.end.y + 0.05 + Math.max(y, 0);
+      dropPos[i * 3 + 2] = path.end.z + (Math.sin(angle) * out + path.heading.z * 3) * age;
+      alphas[i] = y < 0 ? 0 : (1 - age / life) * 0.6;
     }
     geo.attributes.position.needsUpdate = true;
     geo.attributes.aAlpha.needsUpdate = true;
@@ -625,12 +722,189 @@ function buildWater(uTime: { value: number }, uOn: { value: number }) {
 }
 
 // =====================================================================
+// Room: the painted cinderblock hallway wall the unit hangs on, and a waxed tile floor
+// =====================================================================
+
+function buildRoom(model: THREE.Group, env: THREE.Texture) {
+  // envMapIntensity only applies when a material has its own envMap (scene.environment ignores it).
+  // Wall: 16" x 8" blocks with recessed mortar joints, under a few coats of eggshell paint.
+  const WALL_W = 420;
+  const WALL_H = 130;
+  const block = cinderblockTextures();
+  for (const t of [block.bump, block.rough]) t.repeat.set(WALL_W / 64, WALL_H / 32);
+  const wall = new THREE.Mesh(
+    new THREE.PlaneGeometry(WALL_W, WALL_H),
+    new THREE.MeshPhysicalMaterial({
+      color: "#7c7b78",
+      roughness: 1,
+      roughnessMap: block.rough,
+      bumpMap: block.bump,
+      bumpScale: 1.6,
+      // Lit almost only by the spot, so the wall falls off to black away from the fountain.
+      envMap: env,
+      envMapIntensity: 0.04,
+    }),
+  );
+  wall.position.set(0, WALL_H / 2, -0.4);
+  wall.receiveShadow = true;
+  model.add(wall);
+
+  // Floor: 12" vinyl tiles, waxed to a soft sheen.
+  const tile = floorTexture();
+  tile.repeat.set(WALL_W / 48, 80 / 48);
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(WALL_W, 80),
+    new THREE.MeshPhysicalMaterial({
+      color: "#6a6865",
+      map: tile,
+      roughness: 0.42,
+      clearcoat: 0.2,
+      clearcoatRoughness: 0.4,
+      envMap: env,
+      envMapIntensity: 0.12,
+    }),
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(0, 0, 40 - 0.4);
+  floor.receiveShadow = true;
+  model.add(floor);
+
+  // Cove base where wall meets floor.
+  const base = new THREE.Mesh(
+    new THREE.BoxGeometry(WALL_W, 4, 0.25),
+    new THREE.MeshPhysicalMaterial({ color: "#1b1b1b", roughness: 0.5, envMap: env, envMapIntensity: 0.1 }),
+  );
+  base.position.set(0, 2, -0.27);
+  base.receiveShadow = true;
+  model.add(base);
+
+  // Contact shadows: soft darkening where the steel meets the wall (ambient occlusion the spot can't give).
+  const ao = softRectTexture();
+  const contact = (cx: number, cy: number, w: number, h: number, strength: number) => {
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, h),
+      new THREE.MeshBasicMaterial({ color: "#000000", alphaMap: ao, transparent: true, opacity: strength, depthWrite: false }),
+    );
+    mesh.position.set(cx, cy, -0.36);
+    model.add(mesh);
+  };
+  contact(-UNIT_W / 2, HI_RIM - 10, UNIT_W + 7, 28, 0.75);
+  contact(UNIT_W / 2, LO_RIM - 10, UNIT_W + 7, 28, 0.75);
+  contact(-UNIT_W / 2, HI_RIM + 3.2 + 12.5, 16 + 6, 31, 0.6);
+}
+
+// Bump + roughness maps for a painted block wall. The texture covers 4 x 4 blocks (64" x 32").
+function cinderblockTextures() {
+  const W = 1024;
+  const H = 512;
+  const px = W / 64; // pixels per inch
+  const bump = document.createElement("canvas");
+  bump.width = W;
+  bump.height = H;
+  const b = bump.getContext("2d")!;
+  b.fillStyle = "rgb(150,150,150)";
+  b.fillRect(0, 0, W, H);
+  // Pitted block face under the paint
+  for (let i = 0; i < 9000; i++) {
+    const v = 120 + Math.random() * 60;
+    b.fillStyle = `rgba(${v},${v},${v},0.5)`;
+    const r = Math.random() * 2.2 + 0.4;
+    b.beginPath();
+    b.arc(Math.random() * W, Math.random() * H, r, 0, Math.PI * 2);
+    b.fill();
+  }
+  // Mortar joints, running bond: horizontal every 8", vertical every 16" offset per course.
+  const joint = 0.45 * px;
+  b.fillStyle = "rgb(60,60,60)";
+  b.filter = "blur(1.5px)";
+  for (let row = 0; row < 4; row++) {
+    const y = row * 8 * px;
+    b.fillRect(0, y - joint / 2, W, joint);
+    if (row === 0) b.fillRect(0, H - joint / 2, W, joint);
+    for (let col = -1; col < 5; col++) {
+      const x = (col * 16 + (row % 2) * 8) * px;
+      b.fillRect(x - joint / 2, y, joint, 8 * px);
+    }
+  }
+  b.filter = "none";
+
+  // Roughness: paint is fairly matte, a bit shinier on worn, touched areas.
+  const rough = document.createElement("canvas");
+  rough.width = W;
+  rough.height = H;
+  const r = rough.getContext("2d")!;
+  r.fillStyle = "rgb(205,205,205)";
+  r.fillRect(0, 0, W, H);
+  for (let i = 0; i < 40; i++) {
+    const x = Math.random() * W;
+    const y = Math.random() * H;
+    const rad = 20 + Math.random() * 90;
+    const g = r.createRadialGradient(x, y, 0, x, y, rad);
+    g.addColorStop(0, "rgba(150,150,150,0.5)");
+    g.addColorStop(1, "rgba(150,150,150,0)");
+    r.fillStyle = g;
+    r.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  }
+  const wrap = (c: HTMLCanvasElement) => {
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 8;
+    return t;
+  };
+  return { bump: wrap(bump), rough: wrap(rough) };
+}
+
+// 12" speckled vinyl composition tiles, 4 x 4 per texture, with faint seams and shade variation.
+function floorTexture() {
+  const S = 1024;
+  const c = document.createElement("canvas");
+  c.width = c.height = S;
+  const ctx = c.getContext("2d")!;
+  const t = S / 4;
+  for (let i = 0; i < 4; i++)
+    for (let j = 0; j < 4; j++) {
+      const v = 170 + Math.random() * 25;
+      ctx.fillStyle = `rgb(${v},${v},${v - 4})`;
+      ctx.fillRect(i * t, j * t, t, t);
+    }
+  for (let i = 0; i < 14000; i++) {
+    const v = Math.random() < 0.5 ? 90 + Math.random() * 40 : 215 + Math.random() * 40;
+    ctx.fillStyle = `rgba(${v},${v},${v},0.55)`;
+    ctx.fillRect(Math.random() * S, Math.random() * S, 1 + Math.random() * 2.5, 1 + Math.random() * 2.5);
+  }
+  ctx.fillStyle = "rgba(40,40,40,0.5)";
+  for (let k = 0; k <= 4; k++) {
+    ctx.fillRect(k * t - 1, 0, 2, S);
+    ctx.fillRect(0, k * t - 1, S, 2);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+// A blurred white rectangle on black: alpha mask for the contact shadows.
+function softRectTexture() {
+  const S = 256;
+  const c = document.createElement("canvas");
+  c.width = c.height = S;
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, S, S);
+  ctx.filter = "blur(22px)";
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(S * 0.2, S * 0.18, S * 0.6, S * 0.64);
+  return new THREE.CanvasTexture(c);
+}
+
+// =====================================================================
 // Atmosphere
 // =====================================================================
 
 function buildLightCone() {
   const cone = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.12, 1.9, 8, 96, 1, true),
+    new THREE.CylinderGeometry(0.12, 2.1, 8, 96, 1, true),
     new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -653,26 +927,25 @@ function buildLightCone() {
         varying vec3 vN;
         varying vec3 vV;
         void main() {
-          // Brightest where we look through the most "air": facing the camera, near the top.
           float facing = pow(clamp(abs(dot(normalize(vN), normalize(vV))), 0.0, 1.0), 2.0);
-          float a = facing * pow(vUv.y, 1.4) * 0.07 * smoothstep(0.0, 0.25, vUv.y);
+          float a = facing * pow(vUv.y, 1.4) * 0.06 * smoothstep(0.0, 0.25, vUv.y);
           gl_FragColor = vec4(vec3(1.0), a);
         }
       `,
     }),
   );
-  cone.position.set(0.12, 2.6, 0.2);
+  cone.position.set(0.15, 2.6, 0.3);
   cone.rotation.z = -0.1;
   return cone;
 }
 
 function buildDust() {
-  const COUNT = 520;
+  const COUNT = 420;
   const base = new Float32Array(COUNT * 3);
   const positions = new Float32Array(COUNT * 3);
   const sizes = new Float32Array(COUNT);
   for (let i = 0; i < COUNT; i++) {
-    const r = Math.sqrt(Math.random()) * 2.2;
+    const r = Math.sqrt(Math.random()) * 2.4;
     const a = Math.random() * Math.PI * 2;
     base.set([Math.cos(a) * r, Math.random() * 6 - 2.5, Math.sin(a) * r], i * 3);
     sizes[i] = 0.4 + Math.random() ** 3 * 2.2;
@@ -694,7 +967,7 @@ function buildDust() {
         void main() {
           // Motes only catch light inside the cone.
           float r = length(position.xz);
-          float coneR = mix(1.9, 0.12, clamp((position.y + 1.4) / 8.0, 0.0, 1.0));
+          float coneR = mix(2.1, 0.12, clamp((position.y + 1.4) / 8.0, 0.0, 1.0));
           vLit = smoothstep(coneR, coneR * 0.4, r);
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
           gl_PointSize = aSize * uScale * 14.0 / -mv.z;
@@ -704,7 +977,7 @@ function buildDust() {
       fragmentShader: /* glsl */ `
         varying float vLit;
         void main() {
-          float a = smoothstep(0.5, 0.0, length(gl_PointCoord - 0.5)) * vLit * 0.5;
+          float a = smoothstep(0.5, 0.0, length(gl_PointCoord - 0.5)) * vLit * 0.45;
           gl_FragColor = vec4(vec3(1.0), a);
         }
       `,
@@ -713,13 +986,10 @@ function buildDust() {
   points.frustumCulled = false;
   const update = (t: number) => {
     for (let i = 0; i < COUNT; i++) {
-      const bx = base[i * 3];
-      const by = base[i * 3 + 1];
-      const bz = base[i * 3 + 2];
-      const y = ((by + t * 0.04 + 2.5) % 6) - 2.5;
-      positions[i * 3] = bx + Math.sin(t * 0.21 + i) * 0.06;
+      const y = ((base[i * 3 + 1] + t * 0.04 + 2.5) % 6) - 2.5;
+      positions[i * 3] = base[i * 3] + Math.sin(t * 0.21 + i) * 0.06;
       positions[i * 3 + 1] = y;
-      positions[i * 3 + 2] = bz + Math.cos(t * 0.17 + i * 1.3) * 0.06;
+      positions[i * 3 + 2] = base[i * 3 + 2] + Math.cos(t * 0.17 + i * 1.3) * 0.06;
     }
     geo.attributes.position.needsUpdate = true;
   };
@@ -731,20 +1001,20 @@ function buildStudio() {
   const env = new THREE.Scene();
   env.add(new THREE.Mesh(new THREE.SphereGeometry(30, 32, 16), new THREE.MeshBasicMaterial({ color: "#020202", side: THREE.BackSide })));
   const panel = (w: number, h: number, k: number, pos: [number, number, number]) => {
-    const m = new THREE.Mesh(
+    const mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(w, h),
       new THREE.MeshBasicMaterial({ color: new THREE.Color(k, k, k), side: THREE.DoubleSide }),
     );
-    m.position.set(...pos);
-    m.lookAt(0, 0, 0);
-    env.add(m);
+    mesh.position.set(...pos);
+    mesh.lookAt(0, 0, 0);
+    env.add(mesh);
   };
   panel(9, 9, 2.6, [0, 10, 0]); // overhead softbox
   panel(4, 11, 2.2, [-6, 1, 3]); // big left softbox
   panel(1.5, 12, 1.7, [6, 1, 1]); // right strip
   panel(2.5, 10, 1.9, [2, 1, -8]); // back rim strip
   panel(3, 5, 1.2, [-3, 2, 7]); // front-left key
-  panel(10, 0.35, 3.2, [0, 4, 6]); // thin horizontal strip: crisp line on the bowl
+  panel(10, 0.35, 3.2, [0, 4, 6]); // thin horizontal strip: crisp line along the rims
   panel(20, 20, 0.35, [0, -6, 0]); // floor bounce
   return env;
 }
@@ -753,36 +1023,42 @@ function buildStudio() {
 // Helpers
 // =====================================================================
 
-function lathe(profile: number[][], segments: number, smoothProfile = true) {
-  const pts = profile.map(([r, y]) => new THREE.Vector2(r, y));
-  const outline = smoothProfile ? new THREE.SplineCurve(pts).getPoints(profile.length * 14) : pts;
-  return new THREE.LatheGeometry(outline, segments);
+/** Draws a rounded rectangle into `p`, centered on x = cx, spanning y0..y0 + h. */
+function traceRoundedRect<T extends THREE.Path>(p: T, w: number, h: number, r: number, cx = 0, y0 = 0): T {
+  const x0 = cx - w / 2;
+  const x1 = cx + w / 2;
+  const y1 = y0 + h;
+  p.moveTo(x0 + r, y0);
+  p.lineTo(x1 - r, y0);
+  p.quadraticCurveTo(x1, y0, x1, y0 + r);
+  p.lineTo(x1, y1 - r);
+  p.quadraticCurveTo(x1, y1, x1 - r, y1);
+  p.lineTo(x0 + r, y1);
+  p.quadraticCurveTo(x0, y1, x0, y1 - r);
+  p.lineTo(x0, y0 + r);
+  p.quadraticCurveTo(x0, y0, x0 + r, y0);
+  return p;
 }
 
-function smooth(e0: number, e1: number, x: number) {
-  const t = Math.min(Math.max((x - e0) / (e1 - e0), 0), 1);
-  return t * t * (3 - 2 * t);
+/** A box with every edge rounded by `r`, centered on the origin. */
+function roundedBox(w: number, h: number, d: number, r: number) {
+  const iw = w - 2 * r;
+  const ih = h - 2 * r;
+  const corner = Math.max(Math.min(r, iw / 2, ih / 2) * 0.98, 0.001);
+  const geo = new THREE.ExtrudeGeometry(traceRoundedRect(new THREE.Shape(), iw, ih, corner), {
+    depth: Math.max(d - 2 * r, 0.01),
+    bevelEnabled: true,
+    bevelThickness: r,
+    bevelSize: r,
+    bevelSegments: 4,
+    curveSegments: 8,
+  });
+  geo.center();
+  return geo;
 }
 
-function easeInOut(t: number) {
-  return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
-}
-
-function sampleKeys(keys: number[][], p: number): number[] {
-  if (p <= keys[0][0]) return keys[0].slice(1);
-  for (let i = 1; i < keys.length; i++) {
-    if (p <= keys[i][0]) {
-      const a = keys[i - 1];
-      const b = keys[i];
-      const t = smooth(a[0], b[0], p);
-      return a.slice(1).map((v, j) => v + (b[j + 1] - v) * t);
-    }
-  }
-  return keys[keys.length - 1].slice(1);
-}
-
-// Vertical grain for brushed steel (used as both roughness and bump).
-function brushedTexture() {
+// Fine grain for brushed steel (used as both roughness and bump). `scale` maps inch-based UVs to the texture.
+function brushedTexture(scale: number) {
   const c = document.createElement("canvas");
   c.width = 2048;
   c.height = 4;
@@ -794,7 +1070,7 @@ function brushedTexture() {
   }
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(2, 1);
+  tex.repeat.set(scale, scale);
   tex.anisotropy = 8;
   return tex;
 }
@@ -804,14 +1080,14 @@ function smudgeTexture() {
   const c = document.createElement("canvas");
   c.width = c.height = 512;
   const ctx = c.getContext("2d")!;
-  ctx.fillStyle = "rgb(22,22,22)";
+  ctx.fillStyle = "rgb(24,24,24)";
   ctx.fillRect(0, 0, 512, 512);
-  for (let i = 0; i < 70; i++) {
+  for (let i = 0; i < 80; i++) {
     const x = Math.random() * 512;
     const y = Math.random() * 512;
-    const r = 6 + Math.random() ** 2 * 50;
+    const r = 6 + Math.random() ** 2 * 45;
     const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-    const v = 40 + Math.random() * 50;
+    const v = 45 + Math.random() * 55;
     g.addColorStop(0, `rgba(${v},${v},${v},0.8)`);
     g.addColorStop(1, `rgba(${v},${v},${v},0)`);
     ctx.fillStyle = g;
@@ -819,28 +1095,50 @@ function smudgeTexture() {
   }
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(3, 1);
   return tex;
 }
 
-// Engraved data plate.
-function plateTexture() {
+// Slotted drip tray.
+function trayTexture() {
   const c = document.createElement("canvas");
   c.width = 512;
   c.height = 256;
   const ctx = c.getContext("2d")!;
-  ctx.fillStyle = "#8d8e90";
+  ctx.fillStyle = "#3a3b3d";
   ctx.fillRect(0, 0, 512, 256);
-  ctx.strokeStyle = "#2a2a2a";
-  ctx.lineWidth = 4;
-  ctx.strokeRect(14, 14, 484, 228);
-  ctx.fillStyle = "#1c1c1c";
-  ctx.font = "600 40px ui-monospace, Menlo, monospace";
-  ctx.fillText("BOILER FOUNTAINS", 40, 80);
-  ctx.font = "26px ui-monospace, Menlo, monospace";
-  ctx.fillText("MODEL PF-01   115V 60HZ", 40, 135);
-  ctx.fillText("CHILLED (ALLEGEDLY)", 40, 175);
-  ctx.fillText("SER. 0000001", 40, 215);
+  ctx.fillStyle = "#050505";
+  for (let y = 24; y < 240; y += 26) {
+    ctx.beginPath();
+    ctx.roundRect(28, y, 456, 10, 5);
+    ctx.fill();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// LED counter: unlit segments ghosted behind the lit digits, like a real 7-segment display.
+function displayTexture(counter: number) {
+  const c = document.createElement("canvas");
+  c.width = 1024;
+  c.height = 410;
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#fff";
+  ctx.font = "600 34px ui-monospace, Menlo, monospace";
+  ctx.fillText("B O T T L E S   S A V E D", 512, 360);
+  ctx.textAlign = "left";
+  ctx.font = "600 26px ui-monospace, Menlo, monospace";
+  ctx.fillText("FILTER", 70, 70);
+  for (let i = 0; i < 3; i++) ctx.fillRect(190 + i * 34, 50, 26, 22);
+  ctx.textAlign = "center";
+  ctx.font = "700 190px ui-monospace, Menlo, monospace";
+  ctx.globalAlpha = 0.09;
+  ctx.fillText("8888888", 512, 285);
+  ctx.globalAlpha = 1;
+  ctx.fillText(String(Math.max(0, counter)).padStart(7, "0"), 512, 285);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
